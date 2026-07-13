@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class CommandRunner:
     """Utility class to run shell commands."""
 
@@ -18,21 +19,24 @@ class CommandRunner:
         """Run a shell command and return the output."""
         try:
             result = subprocess.run(
-                command, 
+                command,
                 check=True,
-                capture_output=True, 
-                text=True, 
+                capture_output=True,
+                text=True,
                 timeout=timeout,
-                shell=True
-                )
+                shell=False,
+            )
 
             return result.stdout.strip().strip('"')
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             logger.error("Command %s failed", " ".join(command))
             return ""
         except subprocess.TimeoutExpired:
-            logger.error("Command %s timed out after %d seconds", " ".join(command), timeout)
+            logger.error(
+                "Command %s timed out after %d seconds", " ".join(command), timeout
+            )
             return ""
+
 
 class RemoteCollector:
     """Class to collect data from remote servers."""
@@ -41,7 +45,7 @@ class RemoteCollector:
         self.hosts = hosts
         self.command = command
 
-    def _collect_from_host(self, host: str, output_dir:Path) -> None:
+    def _collect_from_host(self, host: str, output_dir: Path) -> None:
         """Collect data from a single server."""
         logger.info(f"Collecting data from {host}...")
         if host == "localhost":
@@ -49,7 +53,6 @@ class RemoteCollector:
         else:
             ssh_command = ["ssh", host, *self.command]
         for attempt in range(3):
-            
             output = CommandRunner.run_command(ssh_command)
             if output:
                 break
@@ -67,11 +70,10 @@ class RemoteCollector:
     def collect_from_all_hosts(self, output_dir: Path) -> None:
         """Collect data from all servers concurrently."""
         output_dir.mkdir(parents=True, exist_ok=True)
-        max_workers = max(1,len(self.hosts))
+        max_workers = max(1, len(self.hosts))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            
             futures = {
-                executor.submit(self._collect_from_host, host, output_dir): host 
+                executor.submit(self._collect_from_host, host, output_dir): host
                 for host in self.hosts
             }
             for future in as_completed(futures):
@@ -80,16 +82,32 @@ class RemoteCollector:
                     future.result()
                 except Exception as e:
                     logger.error(f"Error collecting data from {host}: {e}")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Distributed Collector for Remote Servers")
-    parser.add_argument("--hosts", nargs="+", required=True, help="List of remote hosts to collect data from")
-    parser.add_argument("--command", nargs="+", required=True, help="Command to run on remote servers")
-    parser.add_argument("--output-dir", default="collected_data", help="Directory to save collected data")
-    
+    parser = argparse.ArgumentParser(
+        description="Distributed Collector for Remote Servers"
+    )
+    parser.add_argument(
+        "--hosts",
+        nargs="+",
+        required=True,
+        help="List of remote hosts to collect data from",
+    )
+    parser.add_argument(
+        "--command", nargs="+", required=True, help="Command to run on remote servers"
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="collected_data",
+        help="Directory to save collected data",
+    )
+
     args = parser.parse_args()
-    
+
     collector = RemoteCollector(args.hosts, args.command)
     collector.collect_from_all_hosts(Path(args.output_dir))
+
 
 if __name__ == "__main__":
     main()
